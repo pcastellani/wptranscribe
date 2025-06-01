@@ -5,7 +5,7 @@
 ## Features
 
 * **Whisper Model:** Leverages Hugging Face Transformers' Whisper implementation.
-* **Low VRAM Mode:** Offloads model weights to CPU using `accelerate` for limited GPU memory systems.
+* **Low VRAM Mode:** Optionally offloads model weights using `accelerate` for limited GPU memory systems.
 * **Audio Chunking:** Splits long audio into manageable, overlapping segments.
 * **Repetition Removal:** Detects and removes redundant text from overlapping chunks.
 * **Custom Models:** Supports loading custom-trained Whisper model weights.
