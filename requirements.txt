@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch
+nvidia-cudnn-cu12>=9.1,<9.2
+accelerate
+soundfile
+scipy
+transformers>=4.34.0
+
