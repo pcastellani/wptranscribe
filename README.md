@@ -16,7 +16,7 @@
 
 ### Prerequisites
 
-* All Python dependencies listed in `requirements.txt` (ajust the CUDA version if needed)
+* All Python dependencies listed in `requirements.txt` (adjust the CUDA/cudnn version if needed)
 * `ffmpeg` (for audio format conversion if your file is not 16KHz mono .wav)
 
 ### Usage
