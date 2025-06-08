@@ -233,7 +233,7 @@ def main():
 
 	try:
 		processor.get_decoder_prompt_ids(language=args.language, task="transcribe")
-		print(f"✅ Idiom '{args.language}' supported by model.")
+		print(f"✅ Language '{args.language}' supported by model.")
 	except Exception as e:
 		print(f"❌ Error verifying language '{args.language}': {e}")
 		parser.error(f"Unsupported language code '{args.language}'.")
