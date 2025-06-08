@@ -1,6 +1,7 @@
 # wptranscribe
 
 `wptranscribe` is a Python command-line script for audio transcription using OpenAI's Whisper model.
+
 Whisper + Python -> transcribe
 
 ## Features
