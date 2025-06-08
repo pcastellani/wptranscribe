@@ -17,8 +17,9 @@ except ImportError:
 torch.set_num_threads(os.cpu_count())
 torch.set_num_interop_threads(os.cpu_count())
 
-# Enable synchronous debug mode to ensure CUDA OOM errors are raised in the main thread
-torch.cuda.set_sync_debug_mode('default')
+# Enable synchronous debug mode to ensure CUDA OOM errors are raised in the main thread (only if CUDA is available)
+if torch.cuda.is_available():
+	torch.cuda.set_sync_debug_mode('default')
 
 def get_unique_output_path(path):
 	base, ext = os.path.splitext(path)
