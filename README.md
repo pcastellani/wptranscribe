@@ -21,10 +21,24 @@ Whisper + Python -> transcribe
 
 * All Python dependencies listed in `requirements_cpu.txt` or:
 * For CUDA support (optional) use the reference `requirements.txt` adjusting the CUDA (cu### in the URL) version as needed.
-* * The cudnn line is an example in case a specific version of it is needed.
 * `ffmpeg` (external, for audio format conversion if your file is not 16KHz mono .wav)
 
 ### Usage
 
 ```bash
 python transcribe.py --audio-path <path_to_audio_file> --language <language_code> [options]
+```
+
+**Warning: Extra Disk Usage in Low VRAM Mode**
+
+Whisper models are always cached locally by Hugging Face the first time.
+However, when run with `--lowvram`, `snapshot_download()` will be invoked, which stores a **full copy of the model repository** in the cache directory.
+This will take additional disk space compared to normal mode.
+
+The cache is located by default under:
+- `~/.cache/huggingface/hub/`
+
+To free this space later, you can remove each of the downloaded snapshots like the following example (will be re-download if needed):
+```bash
+rm -rf ~/.cache/huggingface/hub/models--openai--whisper-small
+```
