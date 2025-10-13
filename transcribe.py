@@ -1,24 +1,20 @@
 import torch
 import os
 import sys
+import math
 import argparse
 import soundfile as sf
-from scipy.signal import resample
 from transformers import WhisperForConditionalGeneration, WhisperConfig, WhisperProcessor
+from transformers import GenerationConfig
 import difflib
-
-try:
-	from accelerate import init_empty_weights, load_checkpoint_and_dispatch
-	ACCELERATE_AVAILABLE = True
-except ImportError:
-	ACCELERATE_AVAILABLE = False
+import importlib
 
 # Enable multi-threading for PyTorch
 torch.set_num_threads(os.cpu_count())
 torch.set_num_interop_threads(os.cpu_count())
 
 # Enable synchronous debug mode to ensure CUDA OOM errors are raised in the main thread (only if CUDA is available)
-if torch.cuda.is_available():
+if torch.cuda.is_available() and hasattr(torch.cuda, "set_sync_debug_mode"):
 	torch.cuda.set_sync_debug_mode('default')
 
 def get_unique_output_path(path):
@@ -38,14 +34,24 @@ def load_custom_whisper_model(model_path, device, model_size, lowvram=False):
 		print(f"Initializing Whisper model: {model_name}...")
 
 		if lowvram:
-			if ACCELERATE_AVAILABLE:
+			try:
+				accelerate = importlib.import_module("accelerate")
 				print("Using Accelerate to offload weights to CPU.")
 				config = WhisperConfig.from_pretrained(model_name)
-				with init_empty_weights():
+				with accelerate.init_empty_weights():
 					model = WhisperForConditionalGeneration(config)
-				model = load_checkpoint_and_dispatch(model, model_name, device_map="auto", no_split_module_classes=["WhisperBlock"])
-			else:
-				print("⚠️ Low VRAM mode requested, but 'accelerate' library is not available. Proceeding with standard model loading.")
+				model.tie_weights()
+				huggingface_hub = importlib.import_module("huggingface_hub")
+				ckpt_path = huggingface_hub.snapshot_download(repo_id=model_name)
+				model = accelerate.load_checkpoint_and_dispatch(
+					model,
+					ckpt_path,
+					device_map="auto",
+					no_split_module_classes=["WhisperEncoderLayer", "WhisperDecoderLayer"],
+					dtype=torch.float16 if device == "cuda" else None
+				)
+			except ImportError:
+				print("⚠️ Low VRAM mode requested, but either 'accelerate' or 'huggingface_hub' library is not available. Proceeding with standard model loading.")
 				model = WhisperForConditionalGeneration.from_pretrained(model_name)
 		else:
 			model = WhisperForConditionalGeneration.from_pretrained(model_name)
@@ -55,10 +61,6 @@ def load_custom_whisper_model(model_path, device, model_size, lowvram=False):
 			state_dict = torch.load(model_path, map_location=torch.device(device))
 			model.load_state_dict(state_dict, strict=False)
 			print("Custom weights loaded successfully.")
-
-		if device == "cuda" and torch.cuda.is_available():
-			print("Enabling Gradient Checkpointing...")
-			model.gradient_checkpointing_enable()
 
 		model = model.to(device)
 		print(f"Loaded {model_name} model successfully on {device}!")
@@ -89,16 +91,15 @@ def transcribe_chunk(model, chunk, processor, device, language):
 		input_features = inputs.input_features.to(device=device)
 		attention_mask = inputs.attention_mask.to(device=device)
 
-		forced_decoder_ids = processor.get_decoder_prompt_ids(language=language, task="transcribe")
-
 		with torch.autocast(device_type=device):  # Mixed Precision enabled for both CUDA and CPU
 			predicted_ids = model.generate(
-				input_features, 
-				attention_mask=attention_mask, 
+				input_features,
+				attention_mask=attention_mask,
 				max_new_tokens=440,
-				num_beams=5, 
-				no_repeat_ngram_size=2, 
-				forced_decoder_ids=forced_decoder_ids
+				num_beams=5,
+				no_repeat_ngram_size=2,
+				language=language,
+				task="transcribe"
 			)
 
 		transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
@@ -135,8 +136,11 @@ def transcribe_audio(model, processor, audio_path, output_path, device, language
 
 		if sr != 16000:
 			print(f"Resampling audio from {sr} Hz to 16000 Hz")
-			num_samples = round(len(audio) * float(16000) / sr)
-			audio = resample(audio, num_samples)
+			gcd = math.gcd(sr, 16000)
+			up = 16000 // gcd
+			down = sr // gcd
+			scipy_signal = importlib.import_module("scipy.signal")
+			audio = scipy_signal.resample_poly(audio, up, down).astype("float32")
 
 		print("Audio loaded successfully!")
 
@@ -206,6 +210,7 @@ def main():
 	parser.add_argument('-a', '--audio-path', type=str, required=True, help="Path to the input audio file to transcribe.")
 	parser.add_argument('-o', '--output-path', type=str, default=None, help="Path to save the transcription output.")
 	parser.add_argument('-l', '--language', type=str, required=True, help="Language to use for transcription.")
+	parser.add_argument('-s', '--model-size', type=str, default="small", choices=['tiny', 'small', 'medium', 'large'], help="Size of the Whisper model to use (default: 'small').")
 	parser.add_argument('--dedup-window', type=int, default=200, help="Window size (in characters) for overlap detection.")
 	parser.add_argument('--dedup-threshold', type=float, default=0.9, help="Similarity threshold for overlap removal.")
 	parser.add_argument('--chunk-duration', type=int, default=30, help="Chunk duration (in seconds) for audio splitting.")
@@ -213,7 +218,6 @@ def main():
 	parser.add_argument('--initial_chunk', type=int, default=1, help="Chunk number (1-indexed) to start transcription from. Default is 1 (start from beginning).")
 	parser.add_argument('--use-cuda', action='store_true', help="Use CUDA if available, otherwise default to CPU.")
 	parser.add_argument('--lowvram', action='store_true', help="Enable low VRAM mode using Accelerate and CPU offloading.")
-	parser.add_argument('--model-size', type=str, default="small", choices=['tiny', 'small', 'medium', 'large'], help="Size of the Whisper model to use (default: 'small').")
 
 	args = parser.parse_args()
 
@@ -223,12 +227,18 @@ def main():
 	
 	print(f"Using device: {device}")
 
+	if args.lowvram and device != "cuda":
+		print("⚠️ Low VRAM mode requested, but CUDA is not in use. Ignoring.")
+		args.lowvram = False
+
 	model = load_custom_whisper_model(
-		model_path=args.model_path, 
-		device=device, 
-		model_size=args.model_size, 
+		model_path=args.model_path,
+		device=device,
+		model_size=args.model_size,
 		lowvram=args.lowvram
 	)
+
+	model.generation_config = GenerationConfig.from_pretrained(get_model_name(args.model_size))
 
 	processor = WhisperProcessor.from_pretrained(get_model_name(args.model_size))
 
@@ -240,14 +250,14 @@ def main():
 		parser.error(f"Unsupported language code '{args.language}'.")
 
 	transcribe_audio(
-		model=model, 
-		processor=processor, 
-		audio_path=args.audio_path, 
-		output_path=args.output_path, 
-		device=device, 
-		language=args.language, 
-		chunk_duration=args.chunk_duration, 
-		overlap=args.overlap, 
+		model=model,
+		processor=processor,
+		audio_path=args.audio_path,
+		output_path=args.output_path,
+		device=device,
+		language=args.language,
+		chunk_duration=args.chunk_duration,
+		overlap=args.overlap,
 		dedup_window=args.dedup_window,
 		dedup_threshold=args.dedup_threshold,
 		initial_chunk=args.initial_chunk
@@ -255,4 +265,3 @@ def main():
 
 if __name__ == "__main__":
 	main()
-
