@@ -2,5 +2,4 @@
 torch
 soundfile
 scipy
-transformers>=4.34.0
-
+transformers>=4.36.0
