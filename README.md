@@ -1,8 +1,21 @@
 # wptranscribe
 
-`wptranscribe` is a Python command-line script for audio transcription using OpenAI's Whisper model.
+`wptranscribe` is a Python command-line script for local audio transcription using OpenAI's Whisper model.
 
 Whisper + Python -> transcribe
+
+## Why wptranscribe?
+
+Unlike cloud transcription services, **the audio is processed locally**.
+
+- Audio files are **never uploaded** to any server.
+- Transcription happens entirely on the local machine.
+- Generated transcripts remain local.
+- Internet access is only required the first time a Whisper model is downloaded (or when downloading a different model).
+- Once the model is cached, transcription works completely offline.
+- No service-imposed file size limits or monthly transcription quotas.
+
+This makes `wptranscribe` suitable for confidential recordings, internal company meetings, research interviews, personal archives, and other privacy-sensitive workloads.
 
 ## Features
 
