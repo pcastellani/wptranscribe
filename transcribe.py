@@ -4,8 +4,7 @@ import sys
 import math
 import argparse
 import soundfile as sf
-from transformers import WhisperForConditionalGeneration, WhisperConfig, WhisperProcessor
-from transformers import GenerationConfig
+from transformers import WhisperForConditionalGeneration, WhisperProcessor
 import difflib
 import importlib
 
@@ -35,23 +34,16 @@ def load_custom_whisper_model(model_path, device, model_size, lowvram=False):
 
 		if lowvram:
 			try:
-				accelerate = importlib.import_module("accelerate")
+				importlib.import_module("accelerate")
 				print("Using Accelerate to offload weights to CPU.")
-				config = WhisperConfig.from_pretrained(model_name)
-				with accelerate.init_empty_weights():
-					model = WhisperForConditionalGeneration(config)
-				model.tie_weights()
-				huggingface_hub = importlib.import_module("huggingface_hub")
-				ckpt_path = huggingface_hub.snapshot_download(repo_id=model_name)
-				model = accelerate.load_checkpoint_and_dispatch(
-					model,
-					ckpt_path,
+
+				model = WhisperForConditionalGeneration.from_pretrained(
+					model_name,
 					device_map="auto",
-					no_split_module_classes=["WhisperEncoderLayer", "WhisperDecoderLayer"],
-					dtype=torch.float16 if device == "cuda" else None
+					dtype=torch.float16
 				)
 			except ImportError:
-				print("⚠️ Low VRAM mode requested, but either 'accelerate' or 'huggingface_hub' library is not available. Proceeding with standard model loading.")
+				print("⚠️ Low VRAM mode requested, but 'accelerate' is not available. Proceeding with standard model loading.")
 				model = WhisperForConditionalGeneration.from_pretrained(model_name)
 		else:
 			model = WhisperForConditionalGeneration.from_pretrained(model_name)
@@ -62,11 +54,13 @@ def load_custom_whisper_model(model_path, device, model_size, lowvram=False):
 			model.load_state_dict(state_dict, strict=False)
 			print("Custom weights loaded successfully.")
 
-		model = model.to(device)
+		if not lowvram:
+			model = model.to(device)
+
 		print(f"Loaded {model_name} model successfully on {device}!")
 		return model
 
-	except (torch.cuda.OutOfMemoryError, torch.OutOfMemoryError) as e:
+	except (torch.cuda.OutOfMemoryError, torch.OutOfMemoryError):
 		if device == "cuda":
 			print("\n\n🚨 CUDA Out of Memory Error! Clearing GPU memory and exiting... 🚨\n", flush=True)
 			torch.cuda.empty_cache()
@@ -95,14 +89,13 @@ def transcribe_chunk(model, chunk, processor, device, language):
 			predicted_ids = model.generate(
 				input_features,
 				attention_mask=attention_mask,
-				max_new_tokens=440,
 				num_beams=5,
 				no_repeat_ngram_size=2,
 				language=language,
 				task="transcribe"
 			)
 
-		transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+		transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
 		return transcription
 
 	except (torch.cuda.OutOfMemoryError, torch.OutOfMemoryError) as e:
@@ -237,8 +230,6 @@ def main():
 		model_size=args.model_size,
 		lowvram=args.lowvram
 	)
-
-	model.generation_config = GenerationConfig.from_pretrained(get_model_name(args.model_size))
 
 	processor = WhisperProcessor.from_pretrained(get_model_name(args.model_size))
 
