@@ -1,3 +1,50 @@
+# Configure CUDA libraries before importing torch/transformers. On Linux the
+# dynamic loader reads LD_LIBRARY_PATH at process startup, so re-exec Python
+# if the library search path needs to change.
+import argparse
+import os
+from pathlib import Path
+import sys
+
+def configure_cuda_library_path():
+    early_parser = argparse.ArgumentParser(add_help=False)
+    early_parser.add_argument("--use-cuda", action="store_true")
+    early_parser.add_argument("--venv-path", default=None)
+    early_args, _ = early_parser.parse_known_args()
+
+    if not early_args.use_cuda or sys.platform != "linux":
+        return
+
+    script_dir = Path(__file__).resolve().parent
+    venv_path = (Path(early_args.venv_path).expanduser() if early_args.venv_path
+                 else script_dir / "venv").resolve()
+
+    if early_args.venv_path and not venv_path.is_dir():
+        early_parser.error(f"Virtual environment directory not found: {venv_path}")
+
+    # Must not assume the Python version
+    nvidia_libs = sorted(
+        directory
+        for directory in venv_path.glob("lib/python*/site-packages/nvidia/*/lib")
+        if directory.is_dir()
+    )
+    if not nvidia_libs:
+        print(f"Warning: no NVIDIA library directories found in {venv_path}",
+              file=sys.stderr)
+        return
+
+    current_paths = [p for p in os.environ.get("LD_LIBRARY_PATH", "").split(":") if p]
+    new_paths = [str(p) for p in nvidia_libs if str(p) not in current_paths]
+    if not new_paths:
+        return
+
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = os.pathsep.join(new_paths + current_paths)
+    os.execvpe(sys.executable, [sys.executable, *sys.argv], env)
+
+
+configure_cuda_library_path()
+
 import torch
 import os
 import sys
@@ -210,6 +257,7 @@ def main():
 	parser.add_argument('--overlap', type=int, default=2, help="Overlap (in seconds) between chunks.")
 	parser.add_argument('--initial_chunk', type=int, default=1, help="Chunk number (1-indexed) to start transcription from. Default is 1 (start from beginning).")
 	parser.add_argument('--use-cuda', action='store_true', help="Use CUDA if available, otherwise default to CPU.")
+	parser.add_argument('--venv-path', default=None, help="Virtual environment directory for CUDA libraries (default: ./venv next to this script).")
 	parser.add_argument('--lowvram', action='store_true', help="Enable low VRAM mode using Accelerate and CPU offloading.")
 
 	args = parser.parse_args()
