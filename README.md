@@ -64,7 +64,7 @@ On Linux, `--use-cuda` automatically configures NVIDIA library paths from the `.
 To use a different virtual environment, specify `--venv-path`:
 
 ```bash
-python transcribe.py -a audio.wav -l pt --use-cuda --venv-path /path/to/venv
+python transcribe.py -a <path_to_audio_file> -l <language_code> --use-cuda --venv-path /path/to/venv [other options]
 ```
 
 Library detection is skipped when CUDA is not requested.
