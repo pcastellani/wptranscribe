@@ -25,6 +25,7 @@ This makes `wptranscribe` suitable for confidential recordings, internal company
 * **Repetition Removal:** Removes redundant text from overlapping segments using fuzzy matching.
 * **Custom Models:** Supports loading custom-trained Whisper model weights.
 * **CUDA/CPU Support:** Can use either GPU (CUDA) if available or CPU.
+* **Automatic CUDA Library Detection:** Automatically discovers NVIDIA libraries in ./venv, with support for custom virtual environment paths.
 * **Resume Transcription:** Allows resuming transcription from a specified audio chunk.
 * **Command Line Feedback** Provides real-time progress updates during transcription.
 
@@ -55,3 +56,15 @@ To free this space later, you can remove each of the downloaded snapshots like t
 ```bash
 rm -rf ~/.cache/huggingface/hub/models--openai--whisper-small
 ```
+
+### CUDA Library Detection
+
+On Linux, `--use-cuda` automatically configures NVIDIA library paths from the `./venv` directory, relative to the script location. No manual `LD_LIBRARY_PATH` configuration is required.
+
+To use a different virtual environment, specify `--venv-path`:
+
+```bash
+python transcribe.py -a audio.wav -l pt --use-cuda --venv-path /path/to/venv
+```
+
+Library detection is skipped when CUDA is not requested.
